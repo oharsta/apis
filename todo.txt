@@ -8,7 +8,6 @@ MUST:
   - Add access token expiration to client registration form
 - Documentation overall and README.md per submodule (especially surfconext-authn)
 - Document how to extend the application (by overriding DefaultPackagesResourceConfig and Spring Configuration)
-- Refactor scopes and redirect-uri to seperate tables
 - Turn off session cookies
 - The example-resource-server validate scopes must validate granted scopes
 - Only check the scopes that are actually asked by the clients in the consent page. Do not check any scopes if there
