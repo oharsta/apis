@@ -17,13 +17,12 @@
 package org.surfnet.oaaas.resource;
 
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
-import java.util.UUID;
 
 import javax.inject.Inject;
 import javax.inject.Named;
-import javax.persistence.EntityExistsException;
-import javax.persistence.PersistenceException;
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
 import javax.ws.rs.DELETE;
@@ -38,13 +37,16 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriBuilder;
 
+import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.surfnet.oaaas.auth.AuthorizationServerFilter;
+import org.springframework.transaction.annotation.Transactional;
+import org.surfnet.oaaas.model.Client;
 import org.surfnet.oaaas.model.ResourceServer;
-import org.surfnet.oaaas.model.VerifyTokenResponse;
-import org.surfnet.oaaas.repository.ExceptionTranslator;
+import org.surfnet.oaaas.repository.ClientRepository;
 import org.surfnet.oaaas.repository.ResourceServerRepository;
+
+import static org.apache.commons.collections.CollectionUtils.subtract;
 
 /**
  * JAX-RS Resource for resource servers.
@@ -52,12 +54,16 @@ import org.surfnet.oaaas.repository.ResourceServerRepository;
 @Named
 @Path("/resourceServer")
 @Produces(MediaType.APPLICATION_JSON)
+@Transactional
 public class ResourceServerResource extends AbstractResource {
 
   private static final Logger LOG = LoggerFactory.getLogger(ResourceServerResource.class);
 
   @Inject
   private ResourceServerRepository resourceServerRepository;
+
+  @Inject
+  private ClientRepository clientRepository;
 
   /**
    * Get all existing resource servers for the provided credentials (== owner).
@@ -145,7 +151,7 @@ public class ResourceServerResource extends AbstractResource {
    */
   @POST
   @Path("/{resourceServerId}")
-  public Response post(@Valid ResourceServer resourceServer,
+  public Response post(@Valid final ResourceServer resourceServer,
                        @Context HttpServletRequest request,
                        @PathParam("resourceServerId") Long id) {
     String owner = getUserId(request);
@@ -160,9 +166,32 @@ public class ResourceServerResource extends AbstractResource {
     resourceServer.setKey(persistedResourceServer.getKey());
     resourceServer.setOwner(owner);
 
+    pruneClientScopes(resourceServer.getScopes(), persistedResourceServer.getScopes(), persistedResourceServer.getClients());
     LOG.debug("About to update existing resourceServer {} with new properties: {}", persistedResourceServer, resourceServer);
     ResourceServer savedInstance = resourceServerRepository.save(resourceServer);
     return Response.ok(savedInstance).build();
+  }
+
+  /**
+   * Delete all scopes from clients that are not valid anymore with the new resource server
+   * @param newScopes the newly saved scopes
+   * @param oldScopes the scopes from the existing resource server
+   * @param clients the clients of the resource server
+   */
+  protected void pruneClientScopes(final List<String> newScopes, List<String> oldScopes, List<Client> clients) {
+    if (!newScopes.containsAll(oldScopes)) {
+      subtract(oldScopes, newScopes);
+      Collection outdatedScopes = subtract(oldScopes, newScopes);
+      LOG.info("Resource server has updated scopes. Will remove all outdated scopes from clients: {}", outdatedScopes);
+
+      for (Client c : clients) {
+        final List<String> clientScopes = c.getScopes();
+        if (CollectionUtils.containsAny(clientScopes, outdatedScopes)) {
+          c.setScopes(new ArrayList<String>(subtract(clientScopes, outdatedScopes)));
+        }
+      }
+    }
+    // TODO: testen!
   }
 
   protected String generateKey() {
